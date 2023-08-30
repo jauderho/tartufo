@@ -8,27 +8,84 @@ unwieldy and lead to an overly cumbersome command. It also becomes difficult to
 reliably reproduce the same command in all environments when done this way.
 
 To help with these problems, ``tartufo`` can also be configured by way of a
-configuration file! You can `tell tartufo what config file to use
-<usage.html#cmdoption-tartufo-config>`__, or, it will automatically discover one
-for you. Starting in the current working directory, and traversing backward up
-the directory tree, it will search for both a ``tartufo.toml`` and a
-``pyproject.toml``. The latter is searched for as a matter of convenience for
-Python projects, such as ``tartufo`` itself. For an example of the tree
-traversal, let's say you running ``tartufo`` from the directory
-``/home/my_user/projects/my_project``. ``tartufo`` will look for the
-configuration files first in this directory, then in ``/home/my_user/projects/``,
-then in ``/home/my_user``, etc.
+configuration file!
 
-Within these files, ``tartufo`` will look for a section labeled
-``[tool.tartufo]`` to find its configuration, and will load all items from there
-just as though they had been specified on the command line. This file must be
+You can `tell tartufo what config file to use
+<usage.html#cmdoption-tartufo-config>`__ by specifying one or more configuration
+files on the command line. Paths specified using ``--config`` are interpreted
+relative to the current working directory. Each file is located and processed in order.
+When conflicting directives are provided in different files, the value in the last
+file processed takes precedence. List-valued directives (such as
+``exclude-path-patterns``) that are present in multiple files are concatenated.
+
+.. _configuration-discovery:
+
+Configuration Discovery
+-----------------------
+
+By default, ``tartufo`` will look for a configuration file in the scan target
+repository or folder. It looks for ``tartufo.toml`` first, and if that does not
+exist, then ``pyproject.toml``. The latter is searched for as a matter of
+convenience for Python projects, such as ``tartufo`` itself. The discovered
+configuration file will be processed after configuration files specified on the
+command line, unless it was also specified on the command line -- in which case,
+it will not be read a second time.
+
+Therefore, while normally a target's configuration file will override settings
+specified using ``--config`` on the command line, this behavior can be overridden
+by specifying the target's configuration explicitly first, and then the desired
+"master" configuration second.
+
+Consider:
+
+.. code-block:: shell
+
+   tartufo --config myconfig.toml scan-local-repo <target_directory>
+
+``tartufo`` will look for ``myconfig.toml`` in the current directory, and then look for
+either ``tartufo.toml`` or (if not found) ``pyproject.toml`` in the ``target_directory``
+because that is the target of the scan. Directives in, say,
+``tartufo.toml`` would supersede settings in ``myconfig.toml``.
+
+For purposes of this scan, empty files are considered not to exist.
+
+However:
+
+.. code-block:: shell
+
+   tartufo --config tartufo.toml --config myconfig.toml scan-local-repo .
+
+will cause ``tartufo`` to read ``tartufo.toml`` in the current directory
+(assuming it exists, because it the scan target), and then ``myconfig.toml`` as above.
+
+If ``tartufo.toml`` exists, the effect is that ``tartufo.toml`` is read first, ``myconfig.toml``
+is read second (possibly overriding directives), and ``tartufo.toml`` is not read again because it was
+processed already (and any ``pyproject.toml`` is ignored because ``tartufo.toml`` was found).
+
+If any file specified by ``--config`` doesn't exist, tartufo will raise an error and exit.
+
+**Note**: This behavior is not applicable to remote repository scans, because the
+remote repository will be cloned to a scratch directory and neither that directory
+nor the configuration files within it are available to specify with ``-config``.
+
+.. _configuration-processing:
+
+Configuration Processing
+------------------------
+
+Within each configuration file, ``tartufo`` will look for a section labeled
+``[tool.tartufo]`` to find its configuration. This file must be
 written in the `TOML`_ format, which should look mostly familiar if you have
 dealt with any other configuration file format before.
+
+When the same options appear in multiple files, single-valued options (such as
+booleans) will be set by the last processed file. List-valued options will be
+concatenated to form a longer list.
 
 All command line options can be specified in the configuration file, with or
 without the leading dashes, and using either dashes or underscores for word
 separators. When the configuration is read in, this will all be normalized
-automatically. For example, the configuration for `tartufo` itself looks like
+automatically. For example, the configuration for ``tartufo`` itself looks like
 this:
 
 .. code-block:: toml
@@ -74,24 +131,9 @@ scans. To do this, you can add it to your config file.
 
     [tool.tartufo]
     exclude-signatures = [
-      "2a3cb329b81351e357b09f1b97323ff726e72bd5ff8427c9295e6ef68226e1d1",
-    ]
-
-Done! This particular issue will no longer show up in your scan results.
-
-As of version 3.0, a new format for specifying exclusion signatures has been added.
-
-.. code-block:: toml
-
-    [tool.tartufo]
-    exclude-signatures = [
         {signature = "2a3cb329b81351e357b09f1b97323ff726e72bd5ff8427c9295e6ef68226e1d1", reason = "reason for exclusion"},
     ]
 
-.. note::
-
-    Currently both formats of signature exclusions are supported. However, only `TOML`_ `array of tables`_ format
-    will be supported in future versions.
 
 .. _limiting-scans-by-paths:
 
@@ -111,47 +153,12 @@ Python Regular Expressions (regex) and the `--include-path-patterns` and
 
    [tool.tartufo]
    include-path-patterns = [
-      'src/',
-      'gradle/',
-      # regexes must match the entire path, but can use python's regex syntax
-      # for case-insensitive matching and other advanced options
-      '(.*/)?id_[rd]sa$',
-      # Single quoted strings in TOML don't require escapes for `\` in regexes
-      '(?i).*\.(properties|conf|ini|txt|y(a)?ml)$',
-   ]
-   exclude-path-patterns = [
-      '(.*/)?\.classpath$',
-      '.*\.jmx$',
-      '(.*/)?test/(.*/)?resources/',
-   ]
-
-The filter expressions can also be specified as command line arguments.
-Patterns specified like this are merged with any patterns specified
-in the config file:
-
-.. code-block:: sh
-
-   > tartufo \
-     --include-path-patterns 'src/' -ip 'gradle/' \
-     --exclude-path-patterns '(.*/)?\.classpath$' -xp '.*\.jmx$' \
-     scan-local-repo file://path/to/my/repo.git
-
-As of version 3.0, a new format for specifying paths has been added.
-
-.. code-block:: toml
-
-   [tool.tartufo]
-   include-path-patterns = [
       {path-pattern = 'src/', reason='reason for inclusion'},
    ]
    exclude-path-patterns = [
       {path-pattern = 'poetry\.lock', reason='reason for exclusion'},
    ]
 
-.. note::
-
-    Currently all 3 formats are supported. However, only `TOML`_ `array of tables`_ format
-    will be supported in future versions.
 
 Configuration File Exclusive Options
 ------------------------------------
@@ -249,8 +256,58 @@ Key          Required Value                        Description
 pattern      Yes      Regular expression           The pattern used to check against the match
 path-pattern No       Regular expression           A pattern to specify to what files the exclusion will apply
 reason       No       String                       A plaintext reason the exclusion has been added
-match-type   No       String ("match" or "scope")  Whether to perform a `search or match`_ regex operation
+match-type   No       String ("search" or "match")  Whether to perform a `search or match`_ regex operation
 scope        No       String ("word" or "line")    Whether to match against the current word or full line of text
+============ ======== ============================ ==============================================================
+
+.. regex-exclusion-patterns:
+
+Regex Exclusion Patterns
+++++++++++++++++++++++++
+
+Regex scans can produce false positive matches such as environment variables in
+URLs. To avoid these false positives, you can use the
+``exclude-regex-patterns`` configuration option. These patterns will be
+applied to and matched against any strings flagged by regex pattern checks. As
+above, this directive utilizes an `array of tables`_, enabling two forms:
+
+Option 1:
+
+.. code-block:: toml
+
+    [tool.tartufo]
+    exclude-regex-patterns = [
+        {path-pattern = 'products_.*\.txt', pattern = '^SK[\d]{16,32}$', reason = 'SKU pattern that resembles Twilio API Key'},
+        {path-pattern = '\.github/workflows/.*\.yaml', pattern = 'https://\${\S+}:\${\S+}@\S+', reason = 'URL with env variables for auth'},
+    ]
+
+Option 2:
+
+.. code-block:: toml
+
+    [[tool.tartufo.exclude-regex-patterns]]
+    path-pattern = 'products_.*\.txt'
+    pattern = '^SK[\d]{16,32}$'
+    reason = 'SKU pattern that resembles Twilio API Key'
+
+    [[tool.tartufo.exclude-regex-patterns]]
+    path-pattern = '\.github/workflows/.*\.yaml'
+    pattern = 'https://\${\S+}:\${\S+}@\S+'
+    reason = 'URL with env variables for auth'
+
+
+There are 4 relevant keys for this directive, as described below. Note that
+regex scans differ from entropy scans, so the exclusion pattern is always
+tested against the offending regex match(es). As a result, there is no
+``scope`` key for this directive.
+
+============ ======== ============================ ==============================================================
+Key          Required Value                        Description
+============ ======== ============================ ==============================================================
+pattern      Yes      Regular expression           The pattern used to check against the match
+path-pattern No       Regular expression           A pattern to specify to what files the exclusion will apply
+reason       No       String                       A plaintext reason the exclusion has been added
+match-type   No       String ("search" or "match")  Whether to perform a `search or match`_ regex operation
 ============ ======== ============================ ==============================================================
 
 .. _TOML: https://toml.io/

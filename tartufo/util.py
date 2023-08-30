@@ -38,6 +38,11 @@ if TYPE_CHECKING:
 DATETIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 
 
+style_ok: Callable = click.style
+style_error: Callable = click.style
+style_warning: Callable = click.style
+
+
 def del_rw(_func: Callable, name: str, _exc: Exception) -> None:
     """Attempt to grant permission to and force deletion of a file.
 
@@ -118,6 +123,17 @@ def echo_report_result(scanner: "ScannerBase", now: str):
             f"  {pattern} (path={path_pattern}, scope={m_scope}, type={m_type}): {reason}"
         )
 
+    click.echo("\nExcluded regex patterns:")
+    for e_item in scanner.excluded_regex:
+        pattern = e_item.pattern.pattern if e_item.pattern else ""
+        path_pattern = e_item.path_pattern.pattern if e_item.path_pattern else ""
+        m_scope = e_item.re_match_scope.value if e_item.re_match_scope else ""
+        m_type = e_item.re_match_type.value if e_item.re_match_type else ""
+        reason = e_item.name
+        click.echo(
+            f"  {pattern} (path={path_pattern}, scope={m_scope}, type={m_type}): {reason}"
+        )
+
 
 def echo_result(
     options: "types.GlobalOptions",
@@ -145,6 +161,9 @@ def echo_result(
             ],
             "exclude_entropy_patterns": [
                 str(pattern) for pattern in options.exclude_entropy_patterns
+            ],
+            "exclude_regex_patterns": [
+                str(pattern) for pattern in options.exclude_regex_patterns
             ],
             # This member is for reference. Read below...
             # "found_issues": [
@@ -186,6 +205,8 @@ def echo_result(
             click.echo("\n".join(scanner.excluded_signatures))
             click.echo("\nExcluded entropy patterns:")
             click.echo("\n".join(str(path) for path in scanner.excluded_entropy))
+            click.echo("\nExcluded regex patterns:")
+            click.echo("\n".join(str(path) for path in scanner.excluded_regex))
 
 
 def write_outputs(
@@ -227,19 +248,23 @@ def clone_git_repo(
     return pathlib.Path(project_path), origin
 
 
-if sys.stdout.isatty():
-    style_ok = partial(click.style, fg="bright_green")
-    style_error = partial(click.style, fg="red", bold=True)
-    style_warning = partial(click.style, fg="bright_yellow")
-else:
-    # If stdout is not a TTY, don't include color - just pass the string back
-    def _style_func(msg: str, *_: Any, **__: Any) -> str:
-        # We define this func and pass it to partial still to preserve
-        # typing integrity and prevent issues when callers expect to be
-        # able to pass the same args as click.style accepts
-        return msg
+def init_styles(options: types.GlobalOptions):
+    global_vars = globals()
+    if options.color is True or (sys.stdout.isatty() and options.color is None):
+        global_vars["style_ok"] = partial(click.style, fg="bright_green")
+        global_vars["style_error"] = partial(click.style, fg="red", bold=True)
+        global_vars["style_warning"] = partial(click.style, fg="bright_yellow")
+    else:
+        # If stdout is not a TTY, don't include color - just pass the string back
+        def _style_func(msg: str, *_: Any, **__: Any) -> str:
+            # We define this func and pass it to partial still to preserve
+            # typing integrity and prevent issues when callers expect to be
+            # able to pass the same args as click.style accepts
+            return msg
 
-    style_ok = style_error = style_warning = partial(_style_func)
+        global_vars["style_ok"] = global_vars["style_error"] = global_vars[
+            "style_warning"
+        ] = partial(_style_func)
 
 
 def fail(msg: str, ctx: click.Context, code: int = 1) -> NoReturn:

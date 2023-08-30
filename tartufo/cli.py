@@ -8,7 +8,7 @@ from typing import List, Optional
 
 import click
 
-from tartufo import config, scanner, types
+from tartufo import config, scanner, types, util
 
 
 PLUGIN_DIR = pathlib.Path(__file__).parent / "commands"
@@ -43,14 +43,7 @@ class TartufoCLI(click.MultiCommand):
 @click.command(
     cls=TartufoCLI,
     name="tartufo",
-    context_settings=dict(help_option_names=["-h", "--help"]),
-)
-@click.option(
-    "--rules",
-    multiple=True,
-    type=click.File("r"),
-    help="[DEPRECATED] Use the rule-patterns config options instead. Path(s) to regex "
-    "rules json list file(s).",
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 @click.option(
     "--rule-patterns",
@@ -127,8 +120,8 @@ class TartufoCLI(click.MultiCommand):
     ),
     default="text",
     help="""Specify the format in which the output needs to be generated
-    `--output-format json/compact/text`. Either `json`, `compact` or `text`
-    can be specified. If not provided (default) the output will be generated
+    `--output-format json/compact/text/report`. Either `json`, `compact`, `text`
+    or `report` can be specified. If not provided (default) the output will be generated
     in `text` format.""",
 )
 @click.option(
@@ -141,6 +134,16 @@ class TartufoCLI(click.MultiCommand):
     specified multiple times to exclude multiple patterns. If not provided (default), no entropy strings will be
     excluded. ({"path-pattern": {path regex}, "pattern": {pattern regex}, "match-type": "match"|"search",
     "scope": "word"|"line"}).""",
+)
+@click.option(
+    "-xr",
+    "--exclude-regex-patterns",
+    multiple=True,
+    hidden=True,
+    type=click.UNPROCESSED,
+    help="""Specify a regular expression which matches regex strings to exclude from the scan. This option can be
+    specified multiple times to exclude multiple patterns. If not provided (default), no regex strings will be
+    excluded. ({"path-pattern": {path regex}, "pattern": {pattern regex}, "match-type": "match"|"search"}).""",
 )
 @click.option(
     "-e",
@@ -215,6 +218,7 @@ class TartufoCLI(click.MultiCommand):
     ),
     is_eager=True,
     callback=config.read_pyproject_toml,
+    multiple=True,
     help="Read configuration from specified file. [default: tartufo.toml]",
 )
 @click.option(
@@ -251,22 +255,19 @@ class TartufoCLI(click.MultiCommand):
     string will be identified as suspicious.""",
 )
 @click.option(
-    "-b64",
-    "--b64-entropy-score",
-    help="""[DEPRECATED] Use `--entropy-sensitivity`. Modify the base64 entropy score. If
-    a value greater than the default (4.5 in a range of 0.0-6.0) is specified,
-    tartufo lists higher entropy base64 strings (longer or more randomized strings.
-    A lower value lists lower entropy base64 strings (shorter or less randomized
-    strings).""",
+    "--color/--no-color",
+    is_flag=True,
+    default=None,
+    show_default=True,
+    help="""Enable or disable terminal color. If not provided (default), enabled if
+    output is a terminal (TTY).""",
 )
 @click.option(
-    "-hex",
-    "--hex-entropy-score",
-    help="""[DEPRECATED] Use `--entropy-sensitivity`. Modify the hexadecimal entropy score.
-    If a value greater than the default (3.0 in a range of 0.0-4.0) is specified,
-    tartufo lists higher entropy hexadecimal strings (longer or more randomized
-    strings). A lower value lists lower entropy hexadecimal strings (shorter or less
-    randomized strings).""",
+    "--target-config/--no-target-config",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Enable or Disable processing of the config file present in the repository or folder being scanned",
 )
 # The first positional argument here would be a hard-coded version, hence the `None`
 @click.version_option(None, "-V", "--version")
@@ -282,6 +283,10 @@ def main(ctx: click.Context, **kwargs: config.OptionTypes) -> None:
 
     options = types.GlobalOptions(**kwargs)  # type: ignore
     ctx.obj = options
+
+    util.init_styles(options)
+    ctx.color = options.color
+
     if options.quiet and options.verbose > 0:
         raise click.BadParameter("-v/--verbose and -q/--quiet are mutually exclusive.")
 

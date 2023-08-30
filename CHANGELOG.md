@@ -1,3 +1,53 @@
+v4.1.0 - April 3 2023
+--------------------
+
+Features:
+* [#473](https://github.com/godaddy/tartufo/pull/473) - Introduces new flag `--target-config/--no-target-config` to enable or disable processing of the config file in the repository or folder being scanned
+* [#455](https://github.com/godaddy/tartufo/pull/455) - Update documentation to fix incorrect wording
+* [#458](https://github.com/godaddy/tartufo/pull/458) - Adds `--exclude-regex-patterns` to allow for regex-based exclusions
+* [#479](https://github.com/godaddy/tartufo/pull/479) - Remove upward traversal logic for config discovery
+
+Bug fixes:
+* [#482](https://github.com/godaddy/tartufo/pull/482) - Code updates to process rule-patterns set up in the target's default config file i.e. tartufo.toml or pyproject.toml
+* [#467](https://github.com/godaddy/tartufo/issues/467) - Multiple fixes to configuration
+  file processing:
+  - If multiple configuration files were specified, only the last was processed
+    and no error or warning was generated. Now files are processed in order.
+  - When multiple configuration files are specified, list-valued parameters are
+    concatenated and single-valued parameters are overwritten by the last file
+    that defines them.
+  - Configuration files located in the target of a `scan-folder` operation were
+    ignored; now they are located and processed in the same manner as for a
+    `scan-local-repo` or `scan-remote-repo` operation.
+
+v4.0.1 - Mar 1 2023
+--------------------
+
+Features:
+* [#448](https://github.com/godaddy/tartufo/pull/448) - Update `GitPython` to `3.1.30` following [CVE-2022-24439](https://github.com/advisories/GHSA-hcpj-qp55-gfph)
+* [#449](https://github.com/godaddy/tartufo/pull/449) - Update documentation to remove deprecated config items.
+
+v4.0.0 - Jan 17 2023
+--------------------
+
+Features:
+* [#433](https://github.com/godaddy/tartufo/pull/433) - Dropped support for deprecated flags rules, b64, hex 
+  and corresponding code around deprecated options. Removed support for old signatures which generated with +/- 
+  chars in git diff.
+
+* [#411](https://github.com/godaddy/tartufo/pull/411) - Drop support for python 3.6.
+  This version reached end of life several years ago, and end of security support at
+  the end of 2021. Users with a requirement to run tartufo on this python version
+  should remain at v3.3.x.
+ 
+* [#403](https://github.com/godaddy/tartufo/pull/403) - Add support for python 3.11.
+  * Update various support libraries to current versions
+  * Rebase container to python 3.11
+  * Add CI step to verify container is operational
+
+* [#348](https://github.com/godaddy/tartufo/pull/348) - Add --no-git-check option
+  to skip confirmation dialog for scan-folder
+
 v3.3.1 - 23 Nov 2022
 --------------------
 

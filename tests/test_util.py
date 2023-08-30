@@ -270,6 +270,7 @@ class OutputTests(unittest.TestCase):
             output_format=types.OutputFormat.Json.value,
             exclude_signatures=[],
             exclude_entropy_patterns=[],
+            exclude_regex_patterns=[],
         )
 
         # We're generating JSON piecemeal, so if we want to be safe we'll recover
@@ -288,6 +289,7 @@ class OutputTests(unittest.TestCase):
                 "excluded_paths": [],
                 "excluded_signatures": [],
                 "exclude_entropy_patterns": [],
+                "exclude_regex_patterns": [],
                 "found_issues": [
                     {
                         "issue_type": "High Entropy",
@@ -334,10 +336,15 @@ class OutputTests(unittest.TestCase):
             "aaaaa::bbbbb",
             "ccccc::ddddd",
         ]
+        exclude_regex_patterns = [
+            "eeeee::fffff",
+            "ggggg::hhhhh",
+        ]
         options = generate_options(
             GlobalOptions,
             output_format=types.OutputFormat.Json.value,
             exclude_entropy_patterns=exclude_entropy_patterns,
+            exclude_regex_patterns=exclude_regex_patterns,
         )
 
         # We're generating JSON piecemeal, so if we want to be safe we'll recover
@@ -360,6 +367,10 @@ class OutputTests(unittest.TestCase):
                 "exclude_entropy_patterns": [
                     "aaaaa::bbbbb",
                     "ccccc::ddddd",
+                ],
+                "exclude_regex_patterns": [
+                    "eeeee::fffff",
+                    "ggggg::hhhhh",
                 ],
                 "found_issues": [
                     {
@@ -519,6 +530,7 @@ class OutputTests(unittest.TestCase):
             exclude_signatures=[],
             exclude_path_patterns=[],
             exclude_entropy_patterns=[],
+            exclude_regex_patterns=[],
         )
         mock_scanner.global_options = options
         mock_scanner.issues = []
@@ -561,6 +573,7 @@ class OutputTests(unittest.TestCase):
             exclude_signatures=[],
             exclude_path_patterns=[],
             exclude_entropy_patterns=[],
+            exclude_regex_patterns=[],
         )
         mock_scanner.global_options = options
         mock_scanner.issues = []
@@ -602,6 +615,7 @@ class OutputTests(unittest.TestCase):
             exclude_signatures=[],
             exclude_path_patterns=[],
             exclude_entropy_patterns=[],
+            exclude_regex_patterns=[],
         )
         mock_scanner.global_options = options
         issue_1 = scanner.Issue(
@@ -664,9 +678,44 @@ class GeneralUtilTests(unittest.TestCase):
         mock_click.echo.assert_called_once_with(mock_style.return_value, err=True)
 
     @mock.patch("tartufo.util.sys.stdout")
+    def test_style_when_color_is_disabled(self, mock_stdout):
+        mock_stdout.isatty.return_value = True
+        importlib.reload(util)  # Forces sys.stdout.isatty to False
+
+        options = generate_options(GlobalOptions, verbose=0, color=False)
+        util.init_styles(options)
+
+        ok_result = util.style_ok("OK")
+        error_result = util.style_error("ERROR")
+        warning_result = util.style_warning("WARNING")
+
+        self.assertEqual(ok_result, "OK")
+        self.assertEqual(error_result, "ERROR")
+        self.assertEqual(warning_result, "WARNING")
+
+    @mock.patch("tartufo.util.sys.stdout")
+    def test_style_when_color_is_enabled(self, mock_stdout):
+        mock_stdout.isatty.return_value = False
+        importlib.reload(util)  # Forces sys.stdout.isatty to False
+
+        options = generate_options(GlobalOptions, verbose=0, color=True)
+        util.init_styles(options)
+
+        ok_result = util.style_ok("OK")
+        error_result = util.style_error("ERROR")
+        warning_result = util.style_warning("WARNING")
+
+        self.assertEqual(ok_result, "\x1b[92mOK\x1b[0m")
+        self.assertEqual(error_result, "\x1b[31m\x1b[1mERROR\x1b[0m")
+        self.assertEqual(warning_result, "\x1b[93mWARNING\x1b[0m")
+
+    @mock.patch("tartufo.util.sys.stdout")
     def test_style_when_not_a_tty(self, mock_stdout):
         mock_stdout.isatty.return_value = False
         importlib.reload(util)  # Forces sys.stdout.isatty to False
+
+        options = generate_options(GlobalOptions, verbose=0)
+        util.init_styles(options)
 
         ok_result = util.style_ok("OK")
         error_result = util.style_error("ERROR")
@@ -682,6 +731,9 @@ class GeneralUtilTests(unittest.TestCase):
         mock_stdout.isatty.return_value = True
         importlib.reload(util)  # Forces sys.stdout.isatty to True
 
+        options = generate_options(GlobalOptions, verbose=0)
+        util.init_styles(options)
+
         ok_result = util.style_ok("OK")
         error_result = util.style_error("ERROR")
         warning_result = util.style_warning("WARNING")
@@ -693,6 +745,7 @@ class GeneralUtilTests(unittest.TestCase):
 
     @mock.patch("tartufo.util.blake2s")
     def test_signature_is_generated_with_snippet_and_filename(self, mock_hash):
+        util.generate_signature.cache_clear()
         util.generate_signature("foo", "bar")
         mock_hash.assert_called_once_with(b"foo$$bar")
 
@@ -709,7 +762,6 @@ class GeneralUtilTests(unittest.TestCase):
         self.assertEqual(strings, ["asdf"])
 
     def test_find_strings_by_regex_recognizes_hexadecimal(self):
-
         sample_input = """
         1111111111fffffCCCCC This is valid hexadecimal
         g111111111fffffCCCCC This is not because "g" is not in alphabet
@@ -719,7 +771,6 @@ class GeneralUtilTests(unittest.TestCase):
         self.assertEqual(strings, ["1111111111fffffCCCCC"])
 
     def test_find_strings_by_regex_recognizes_base64(self):
-
         sample_input = """
         111111111+ffffCCCC== This is valid base64
         @111111111+ffffCCCC= This is not because "@" is not in alphabet
@@ -731,7 +782,6 @@ class GeneralUtilTests(unittest.TestCase):
         self.assertEqual(strings, ["111111111+ffffCCCC=="])
 
     def test_find_strings_by_regex_recognizes_base64url(self):
-
         sample_input = """
         111111111-ffffCCCC== This is valid base64url
         @111111111-ffffCCCC= This is not because "@" is not in alphabet
@@ -743,7 +793,6 @@ class GeneralUtilTests(unittest.TestCase):
         self.assertEqual(strings, ["111111111-ffffCCCC=="])
 
     def test_find_strings_by_regex_recognizes_mutant_base64(self):
-
         sample_input = """
         +111111111-ffffCCCC= Can't mix + and - but both are in regex
         111111111111111111111== Not a valid length but we don't care

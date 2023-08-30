@@ -61,8 +61,6 @@ class ScanTests(ScannerTestCase):
     def test_scan_iterates_through_all_chunks(self, mock_entropy: mock.MagicMock):
         # Make sure we do at least one type of scan
         self.options.entropy = True
-        self.options.b64_entropy_score = 4.5
-        self.options.hex_entropy_score = 3
         test_scanner = TestScanner(self.options)
         list(test_scanner.scan())
         mock_entropy.assert_has_calls(
@@ -197,7 +195,9 @@ class IncludeExcludePathsTests(ScannerTestCase):
     def test_include_paths_are_calculated_if_specified(
         self, mock_compile: mock.MagicMock
     ):
-        self.options.include_path_patterns = ("foo",)
+        self.options.include_path_patterns = (
+            {"path-pattern": "foo", "reason": "Testing exclude path pattern"},
+        )
         test_scanner = TestScanner(self.options)
         test_scanner.included_paths  # pylint: disable=pointless-statement
         mock_compile.assert_called_once_with({"foo"})
@@ -219,7 +219,9 @@ class IncludeExcludePathsTests(ScannerTestCase):
     def test_exclude_paths_are_calculated_if_specified(
         self, mock_compile: mock.MagicMock
     ):
-        self.options.exclude_path_patterns = ("foo",)
+        self.options.exclude_path_patterns = (
+            {"path-pattern": "foo", "reason": "Testing exclude path pattern"},
+        )
         test_scanner = TestScanner(self.options)
         test_scanner.excluded_paths  # pylint: disable=pointless-statement
         mock_compile.assert_called_once_with({"foo"})
@@ -269,19 +271,54 @@ class RegexRulesTests(ScannerTestCase):
 
     def test_regex_rules_are_computed_when_first_accessed(self):
         self.options.default_regexes = True
-        self.options.rules = "foo"  # type: ignore
-        self.options.rule_patterns = "oof"  # type: ignore
         self.options.git_rules_repo = "bar"
         self.options.git_rules_files = "baz"  # type: ignore
         test_scanner = TestScanner(self.options)
+        test_scanner._rule_patterns = "oof"  # pylint: disable=protected-access
         test_scanner.rules_regexes  # pylint: disable=pointless-statement
         self.mock_configure.assert_called_once_with(
             include_default=True,
-            rules_files="foo",
             rule_patterns="oof",
             rules_repo="bar",
             rules_repo_files="baz",
         )
+
+    def test_rule_patterns_with_rules_in_default_config(self):
+        rule_patterns = [
+            {
+                "reason": "RSA private key 2",
+                "pattern": "-----BEGIN default PRIVATE KEY-----",
+            }
+        ]
+        self.options.rule_patterns = []
+        test_scanner = TestScanner(self.options)
+        test_scanner.config_data = {"rule_patterns": rule_patterns}
+        self.assertEqual(test_scanner.rule_patterns, rule_patterns)
+
+    def test_rule_patterns_with_rules_in_custom_config(self):
+        rule_patterns = [
+            {
+                "reason": "RSA private key 2",
+                "pattern": "-----BEGIN default PRIVATE KEY-----",
+            }
+        ]
+        self.options.rule_patterns = rule_patterns
+        test_scanner = TestScanner(self.options)
+        test_scanner.config_data = {}
+        self.assertEqual(test_scanner.rule_patterns, rule_patterns)
+
+    def test_rule_patterns_with_rule_patterns_syntax_issue(self):
+        rule_patterns = {
+            "reason": "RSA private key 2",
+            "pattern": "-----BEGIN default PRIVATE KEY-----",
+        }
+        self.options.rule_patterns = rule_patterns
+        test_scanner = TestScanner(self.options)
+        test_scanner.config_data = {}
+        with self.assertRaisesRegex(
+            types.ConfigException, "str pattern is illegal in rule-patterns"
+        ):
+            test_scanner.rule_patterns  # pylint: disable=pointless-statement
 
 
 class SignatureTests(ScannerTestCase):
@@ -289,7 +326,9 @@ class SignatureTests(ScannerTestCase):
     def test_matched_signatures_are_excluded(self, mock_signature: mock.MagicMock):
         mock_signature.return_value = "foo"
         test_scanner = TestScanner(self.options)
-        self.options.exclude_signatures = ("foo",)
+        self.options.exclude_signatures = (
+            {"signature": "foo", "reason": "Testing exclude signature"},
+        )
         self.assertTrue(test_scanner.signature_is_excluded("bar", "blah"))
 
     @mock.patch("tartufo.util.generate_signature")
@@ -298,12 +337,16 @@ class SignatureTests(ScannerTestCase):
     ):
         mock_signature.return_value = "bar"
         test_scanner = TestScanner(self.options)
-        self.options.exclude_signatures = ("foo",)
+        self.options.exclude_signatures = (
+            {"signature": "foo", "reason": "Testing exclude signature"},
+        )
         self.assertFalse(test_scanner.signature_is_excluded("blah", "stuff"))
 
     def test_signature_found_as_scan_match_is_excluded(self):
         test_scanner = TestScanner(self.options)
-        self.options.exclude_signatures = ("ford_prefect",)
+        self.options.exclude_signatures = (
+            {"signature": "ford_prefect", "reason": "Testing exclude signature"},
+        )
         self.assertTrue(test_scanner.signature_is_excluded("ford_prefect", "/earth"))
 
 
@@ -397,6 +440,122 @@ class RegexScanTests(ScannerTestCase):
         self.assertEqual(issues[0].issue_detail, "foo")
         self.assertEqual(issues[0].issue_type, types.IssueType.RegEx)
         self.assertEqual(issues[0].matched_string, "foo")
+
+    @mock.patch("tartufo.scanner.ScannerBase.regex_string_is_excluded")
+    def test_issue_is_not_created_if_regex_string_is_excluded(
+        self, mock_regex_string: mock.MagicMock
+    ):
+        mock_regex_string.return_value = True
+        test_scanner = TestScanner(self.options)
+        test_scanner._rules_regexes = {  # pylint: disable=protected-access
+            Rule(
+                name="foo",
+                pattern=re.compile("foo"),
+                path_pattern=None,
+                re_match_type=MatchType.Match,
+                re_match_scope=None,
+            )
+        }
+        chunk = types.Chunk("foo", "bar", {}, False)
+        issues = list(test_scanner.scan_regex(chunk))
+        mock_regex_string.assert_called_once_with("foo", "bar")
+        self.assertEqual(issues, [])
+
+    @mock.patch("tartufo.scanner.ScannerBase.regex_string_is_excluded")
+    def test_issue_is_returned_if_regex_string_is_not_excluded(
+        self, mock_regex_string: mock.MagicMock
+    ):
+        mock_regex_string.return_value = False
+        test_scanner = TestScanner(self.options)
+        test_scanner._rules_regexes = {  # pylint: disable=protected-access
+            Rule(
+                name="foo",
+                pattern=re.compile("foo"),
+                path_pattern=None,
+                re_match_type=MatchType.Match,
+                re_match_scope=None,
+            )
+        }
+        chunk = types.Chunk("foo", "bar", {}, False)
+        issues = list(test_scanner.scan_regex(chunk))
+        mock_regex_string.assert_called_once_with("foo", "bar")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].issue_detail, "foo")
+        self.assertEqual(issues[0].issue_type, types.IssueType.RegEx)
+        self.assertEqual(issues[0].matched_string, "foo")
+
+    def test_regex_string_is_excluded(self):
+        self.options.exclude_regex_patterns = [
+            {
+                "path-pattern": r"docs/.*\.md",
+                "pattern": "f.*",
+            }
+        ]
+        test_scanner = TestScanner(self.options)
+        test_scanner._rules_regexes = {  # pylint: disable=protected-access
+            Rule(
+                name="foo",
+                pattern=re.compile("foo"),
+                path_pattern=None,
+                re_match_type=MatchType.Match,
+                re_match_scope=None,
+            )
+        }
+        excluded = test_scanner.regex_string_is_excluded("barfoo", "docs/README.md")
+        self.assertTrue(excluded)
+
+    def test_regex_string_is_excluded_given_partial_line_match(self):
+        self.options.exclude_regex_patterns = [
+            {"path-pattern": r"docs/.*\.md", "pattern": "line.+?foo"}
+        ]
+        test_scanner = TestScanner(self.options)
+        test_scanner._rules_regexes = {  # pylint: disable=protected-access
+            Rule(
+                name="foo",
+                pattern=re.compile("foo"),
+                path_pattern=None,
+                re_match_type=MatchType.Match,
+                re_match_scope=None,
+            )
+        }
+        excluded = test_scanner.regex_string_is_excluded(
+            "+a line that contains foo", "docs/README.md"
+        )
+        self.assertTrue(excluded)
+
+    def test_regex_string_is_not_excluded(self):
+        self.options.exclude_regex_patterns = [
+            {"path-pattern": r"foo\..*", "pattern": "f.*", "match-type": "match"}
+        ]
+        test_scanner = TestScanner(self.options)
+        test_scanner._rules_regexes = {  # pylint: disable=protected-access
+            Rule(
+                name="foo",
+                pattern=re.compile("foo"),
+                path_pattern=None,
+                re_match_type=MatchType.Match,
+                re_match_scope=None,
+            )
+        }
+        excluded = test_scanner.regex_string_is_excluded("bar", "foo.py")
+        self.assertFalse(excluded)
+
+    def test_regex_string_is_not_excluded_given_different_path(self):
+        self.options.exclude_regex_patterns = [
+            {"path-pattern": r"foo\..*", "pattern": "f.*", "match-type": "match"}
+        ]
+        test_scanner = TestScanner(self.options)
+        test_scanner._rules_regexes = {  # pylint: disable=protected-access
+            Rule(
+                name="foo",
+                pattern=re.compile("foo"),
+                path_pattern=None,
+                re_match_type=MatchType.Match,
+                re_match_scope=None,
+            )
+        }
+        excluded = test_scanner.regex_string_is_excluded("bar", "bar.py")
+        self.assertFalse(excluded)
 
 
 class EntropyManagementTests(ScannerTestCase):
@@ -644,22 +803,12 @@ class EntropyDetectionTests(ScannerTestCase):
         self.assertEqual(test_scanner.b64_entropy_limit, 6.0)
         self.assertEqual(test_scanner.hex_entropy_limit, 4.0)
 
-    def test_sensitivity_deprecated_overrides(self):
-        self.options.b64_entropy_score = 11.1
-        self.options.hex_entropy_score = 22.2
-        test_scanner = TestScanner(self.options)
-
-        self.assertEqual(test_scanner.b64_entropy_limit, 11.1)
-        self.assertEqual(test_scanner.hex_entropy_limit, 22.2)
-
     def test_calculate_entropy_minimum_calculation(self):
-
         # We already know an empty string trivially has zero entropy.
         # Doing the math, a one-character string also should have zero entropy.
         self.assertEqual(self.scanner.calculate_entropy("a"), 0.0)
 
     def test_calculate_entropy_maximum_hexadecimal(self):
-
         # We reach maximum entropy when every character in the alphabet appears
         # once in the input string (order doesn't matter). Each character represents
         # 4 bits (has 2^4 = 16 possible values).
@@ -675,7 +824,6 @@ class EntropyDetectionTests(ScannerTestCase):
         self.assertEqual(self.scanner.calculate_entropy(alphabet), 4.0)
 
     def test_calculate_entropy_maximum_base64(self):
-
         # See above. base64 uses 4 characters to represent 3 bytes, so the
         # underlying bit rate is 24 / 4 = 6 bits per character. Unlike above,
         # case matters, so we include both upper- and lowercase letters.

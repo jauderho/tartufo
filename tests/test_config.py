@@ -16,67 +16,12 @@ from tests import helpers
 
 class ConfigureRegexTests(unittest.TestCase):
     def test_configure_regexes_rules_files_without_defaults(self):
-        rules_path = pathlib.Path(__file__).parent / "data" / "testRules.json"
-        rules_files = (rules_path.open(),)
-        expected_regexes = {
-            Rule(
-                name="RSA private key 2",
-                pattern=re.compile("-----BEGIN EC PRIVATE KEY-----"),
-                path_pattern=None,
-                re_match_type=MatchType.Match,
-                re_match_scope=None,
-            ),
-            Rule(
-                name="Complex Rule",
-                pattern=re.compile("complex-rule"),
-                path_pattern=re.compile("/tmp/[a-z0-9A-Z]+\\.(py|js|json)"),
-                re_match_type=MatchType.Match,
-                re_match_scope=None,
-            ),
-        }
-
-        actual_regexes = config.configure_regexes(
-            include_default=False, rules_files=rules_files
-        )
+        actual_regexes = config.configure_regexes(include_default=False)
 
         self.assertEqual(
-            expected_regexes,
+            set(),
             actual_regexes,
-            f"The regexes dictionary should match the test rules (expected: {expected_regexes}, actual: {actual_regexes})",
-        )
-
-    def test_configure_regexes_rules_files_with_defaults(self):
-        rules_path = pathlib.Path(__file__).parent / "data" / "testRules.json"
-        rules_files = (rules_path.open(),)
-        with config.DEFAULT_PATTERN_FILE.open() as handle:
-            expected_regexes = config.load_rules_from_file(handle)
-        expected_regexes.add(
-            Rule(
-                name="RSA private key 2",
-                pattern=re.compile("-----BEGIN EC PRIVATE KEY-----"),
-                path_pattern=None,
-                re_match_type=MatchType.Match,
-                re_match_scope=None,
-            )
-        )
-        expected_regexes.add(
-            Rule(
-                name="Complex Rule",
-                pattern=re.compile("complex-rule"),
-                path_pattern=re.compile("/tmp/[a-z0-9A-Z]+\\.(py|js|json)"),
-                re_match_type=MatchType.Match,
-                re_match_scope=None,
-            )
-        )
-
-        actual_regexes = config.configure_regexes(
-            include_default=True, rules_files=rules_files
-        )
-
-        self.assertEqual(
-            expected_regexes,
-            actual_regexes,
-            f"The regexes dictionary should match the test rules (expected: {expected_regexes}, actual: {actual_regexes})",
+            "The regexes dictionary should not have been been changed when no defaults or rules files are specified",
         )
 
     def test_configure_regexes_returns_just_default_regexes_by_default(self):
@@ -166,15 +111,6 @@ class ConfigureRegexTests(unittest.TestCase):
             f"The regexes dictionary should match the test rules (expected: {expected_regexes}, actual: {actual_regexes})",
         )
 
-    def test_loading_rules_from_file_raises_deprecation_warning(self):
-        rules_path = pathlib.Path(__file__).parent / "data" / "testRules.json"
-        rules_files = (rules_path.open(),)
-        with self.assertWarnsRegex(
-            DeprecationWarning,
-            "Storing rules in a separate file is deprecated and will be removed in tartufo 4.x. ",
-        ):
-            config.configure_regexes(rules_files=rules_files)
-
     def test_rule_patterns_without_defaults(self):
         rule_patterns = [
             {
@@ -253,17 +189,6 @@ class LoadConfigFromPathTests(unittest.TestCase):
         ):
             config.load_config_from_path(self.data_dir)
 
-    def test_parent_directory_not_checked_if_traverse_is_false(self):
-        with self.assertRaisesRegex(
-            FileNotFoundError,
-            f"Could not find config file in {self.data_dir / 'config'}.".replace(
-                "\\", "\\\\"
-            ),
-        ):
-            config.load_config_from_path(
-                self.data_dir / "config", "pyproject.toml", False
-            )
-
     @mock.patch("tomlkit.loads")
     def test_config_keys_are_normalized(self, mock_load: mock.MagicMock):
         mock_load.return_value = {"tool": {"tartufo": {"--repo-path": "."}}}
@@ -273,6 +198,7 @@ class LoadConfigFromPathTests(unittest.TestCase):
 
 class ReadPyprojectTomlTests(unittest.TestCase):
     def setUp(self):
+        config.REFERENCED_CONFIG_FILES = set()
         self.data_dir = pathlib.Path(__file__).parent / "data"
         self.ctx = click.Context(click.Command("foo"))
         self.param = click.Option(["--config"])
@@ -284,7 +210,7 @@ class ReadPyprojectTomlTests(unittest.TestCase):
     ):
         mock_load.return_value = (self.data_dir / "config" / "tartufo.toml", {})
         self.ctx.params["repo_path"] = str(self.data_dir / "config")
-        config.read_pyproject_toml(self.ctx, self.param, "")
+        config.read_pyproject_toml(self.ctx, self.param, ("",))
         mock_load.assert_called_once_with(self.data_dir / "config", "")
 
     @mock.patch("tartufo.config.load_config_from_path")
@@ -293,14 +219,7 @@ class ReadPyprojectTomlTests(unittest.TestCase):
     ):
         mock_load.side_effect = FileNotFoundError("No file for you!")
         with self.assertRaisesRegex(click.FileError, "No file for you!"):
-            config.read_pyproject_toml(self.ctx, self.param, "foobar.toml")
-
-    @mock.patch("tartufo.config.load_config_from_path")
-    def test_none_is_returned_if_file_not_found_and_none_specified(
-        self, mock_load: mock.MagicMock
-    ):
-        mock_load.side_effect = FileNotFoundError("No file for you!")
-        self.assertIsNone(config.read_pyproject_toml(self.ctx, self.param, ""))
+            config.read_pyproject_toml(self.ctx, self.param, ("foobar.toml",))
 
     @mock.patch("tartufo.config.load_config_from_path")
     def test_file_error_is_raised_if_specified_config_file_cant_be_read(
@@ -310,7 +229,7 @@ class ReadPyprojectTomlTests(unittest.TestCase):
         os.chdir(str(self.data_dir))
         mock_load.side_effect = types.ConfigException("Bad TOML!")
         with self.assertRaisesRegex(click.FileError, "Bad TOML!") as exc:
-            config.read_pyproject_toml(self.ctx, self.param, "foobar.toml")
+            config.read_pyproject_toml(self.ctx, self.param, ("foobar.toml",))
             self.assertEqual(exc.exception.filename, str(self.data_dir / "foobar.toml"))
         os.chdir(str(cur_dir))
 
@@ -322,18 +241,102 @@ class ReadPyprojectTomlTests(unittest.TestCase):
         os.chdir(str(self.data_dir))
         mock_load.side_effect = types.ConfigException("Bad TOML!")
         with self.assertRaisesRegex(click.FileError, "Bad TOML!") as exc:
-            config.read_pyproject_toml(self.ctx, self.param, "")
+            config.read_pyproject_toml(self.ctx, self.param, ("",))
             self.assertEqual(
                 exc.exception.filename, str(self.data_dir / "tartufo.toml")
             )
         os.chdir(str(cur_dir))
 
-    def test_fully_resolved_filename_is_returned(self):
+    def test_fully_resolved_filename_is_stored(self):
         cur_dir = pathlib.Path()
         os.chdir(str(self.data_dir / "config"))
-        result = config.read_pyproject_toml(self.ctx, self.param, "")
+        config.read_pyproject_toml(self.ctx, self.param, ("",))
         os.chdir(str(cur_dir))
-        self.assertEqual(result, str(self.data_dir / "config" / "tartufo.toml"))
+        self.assertEqual(
+            config.REFERENCED_CONFIG_FILES, {self.data_dir / "config" / "tartufo.toml"}
+        )
+
+    @mock.patch("tartufo.config.load_config_from_path")
+    def test_multiple_config_file_data_merged(self, mock_load: mock.MagicMock):
+        # Mock up some fixture data; each call returns the path of the config
+        # file and the data loaded from it.
+        alpha = pathlib.Path("alpha.toml")
+        beta = pathlib.Path("beta.toml")
+        mock_load.side_effect = [
+            (
+                alpha,
+                {
+                    "regex": True,
+                    "exclude_path_patterns": [
+                        {"path-pattern": "alpha", "reason": "Testing"},
+                    ],
+                    "exclude_signatures": [
+                        {"signature": "alpha-signature", "reason": "Testing"},
+                        {"signature": "omega-signature", "reason": "Testing"},
+                    ],
+                },
+            ),
+            (
+                beta,
+                {
+                    "regex": False,
+                    "exclude_entropy_patterns": [
+                        {"path-pattern": "beta", "reason": "Testing"},
+                    ],
+                    "exclude_signatures": [
+                        {"signature": "beta-signature", "reason": "Testing"},
+                        {"signature": "omega-signature", "reason": "Testing"},
+                    ],
+                },
+            ),
+        ]
+
+        config.read_pyproject_toml(self.ctx, self.param, (str(alpha), str(beta)))
+
+        # Single-valued attributes set to conflicting values will be set by
+        # beta because it is specified last.
+        self.assertFalse(self.ctx.default_map["regex"])
+
+        # List-valued attributes specified by alpha but not beta are present
+        self.assertTrue("exclude_path_patterns" in self.ctx.default_map)
+
+        # List-valued attributes specified by beta but not alpha are present
+        self.assertTrue("exclude_entropy_patterns" in self.ctx.default_map)
+
+        # List-valued attributes specified by both alpha and beta are concatenated
+        # and order is preserved (without deduplication)
+        self.assertEqual(
+            self.ctx.default_map["exclude_signatures"],
+            [
+                {"signature": "alpha-signature", "reason": "Testing"},
+                {"signature": "omega-signature", "reason": "Testing"},
+                {"signature": "beta-signature", "reason": "Testing"},
+                {"signature": "omega-signature", "reason": "Testing"},
+            ],
+        )
+
+        # Attributes not specified in either file are not defined
+        self.assertFalse("exclude_regex_patterns" in self.ctx.default_map)
+
+    @mock.patch("tartufo.config.load_config_from_path")
+    def test_fully_resolved_multiple_config_files_returned(
+        self, mock_load: mock.MagicMock
+    ):
+        # Mock up some fixture data; each call returns the path of the config
+        # file and the data loaded from it.
+        alpha = pathlib.Path("alpha.toml")
+        beta = pathlib.Path("beta.toml")
+        mock_load.side_effect = [
+            (alpha, {"unit": "test"}),
+            (beta, {"unit": "test"}),
+        ]
+
+        config.read_pyproject_toml(self.ctx, self.param, (str(alpha), str(beta)))
+
+        # Each file (and no others) should be present in the referenced set
+        self.assertEqual(
+            config.REFERENCED_CONFIG_FILES, {alpha.resolve(), beta.resolve()}
+        )
 
 
 class CompilePathRulesTests(unittest.TestCase):
@@ -364,7 +367,8 @@ class CompileRulesTests(unittest.TestCase):
                 {"path-pattern": r"src/.*", "pattern": r"^[a-zA-Z0-9]{26}$"},
                 {"pattern": r"^[a-zA-Z0-9]test$"},
                 {"path-pattern": r"src/.*", "pattern": r"^[a-zA-Z0-9]{26}::test$"},
-            ]
+            ],
+            "entropy",
         )
         self.assertCountEqual(
             rules,
@@ -399,7 +403,28 @@ class CompileRulesTests(unittest.TestCase):
         rules = config.compile_rules(
             [
                 {"pattern": r"^[a-zA-Z0-9]::test$"},
-            ]
+            ],
+            "entropy",
+        )
+        self.assertEqual(
+            rules,
+            [
+                Rule(
+                    None,
+                    re.compile(r"^[a-zA-Z0-9]::test$"),
+                    re.compile(r""),
+                    re_match_type=MatchType.Search,
+                    re_match_scope=Scope.Line,
+                )
+            ],
+        )
+
+    def test_regex_ignores_scope(self):
+        rules = config.compile_rules(
+            [
+                {"pattern": r"^[a-zA-Z0-9]::test$", "scope": "word"},
+            ],
+            "regex",
         )
         self.assertEqual(
             rules,
@@ -418,7 +443,7 @@ class CompileRulesTests(unittest.TestCase):
         with self.assertRaisesRegex(
             types.ConfigException, "Invalid exclude-entropy-patterns: "
         ):
-            config.compile_rules([{"foo": "bar"}])
+            config.compile_rules([{"foo": "bar"}], "entropy")
 
     @mock.patch("tartufo.util.process_issues", new=mock.MagicMock())
     @mock.patch("tartufo.scanner.FolderScanner")

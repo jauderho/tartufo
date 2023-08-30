@@ -1,6 +1,5 @@
 # ![tartufo logo](docs/source/_static/img/tartufo.png)
 
-[![Join Slack](https://img.shields.io/badge/Join%20us%20on-Slack-e01563.svg)](https://www.godaddy.com/engineering/slack/)
 [![ci](https://github.com/godaddy/tartufo/workflows/ci/badge.svg)](https://github.com/godaddy/tartufo/actions?query=workflow%3Aci)
 [![Codecov](https://img.shields.io/codecov/c/github/godaddy/tartufo)](https://codecov.io/gh/godaddy/tartufo)
 [![PyPI](https://img.shields.io/pypi/v/tartufo)](https://pypi.org/project/tartufo/)
@@ -45,9 +44,6 @@ Usage: tartufo [OPTIONS] COMMAND [ARGS]...
   commit hook.
 
 Options:
-  --rules FILENAME                [DEPRECATED] Use the rule-patterns config
-                                  options instead. Path(s) to regex rules json
-                                  list file(s).
   --default-regexes / --no-default-regexes
                                   Whether to include the default regex list
                                   when configuring search patterns. Only
@@ -60,13 +56,13 @@ Options:
                                   Check the names of files being scanned as
                                   well as their contents.  [default: scan-
                                   filenames]
-  -of, --output-format [json|compact|text]
+  -of, --output-format [json|compact|text|report]
                                   Specify the format in which the output needs
                                   to be generated `--output-format
-                                  json/compact/text`. Either `json`, `compact`
-                                  or `text` can be specified. If not provided
-                                  (default) the output will be generated in
-                                  `text` format.
+                                  json/compact/text/report`. Either `json`,
+                                  `compact`, `text` or `report` can be
+                                  specified. If not provided (default) the
+                                  output will be generated in `text` format.
   -od, --output-dir DIRECTORY     If specified, all issues will be written out
                                   as individual JSON files to a uniquely named
                                   directory under this one. This will help
@@ -90,6 +86,11 @@ Options:
                                   specified multiple times.
   --config FILE                   Read configuration from specified file.
                                   [default: tartufo.toml]
+  --target-config/--no-target-config
+                                  Enable or Disable processing of the config file in the
+                                  repository or folder being scanned
+                                  i.e. config files like tartufo.toml or pyproject.toml
+                                  [default: target-config]
   -q, --quiet / --no-quiet        Quiet mode. No outputs are reported if the
                                   scan is successful and doesn't find any
                                   issues
@@ -108,23 +109,9 @@ Options:
                                   likelihood that a given string will be
                                   identified as suspicious.  [default: 75;
                                   0<=x<=100]
-  -b64, --b64-entropy-score TEXT  [DEPRECATED] Use `--entropy-sensitivity`.
-                                  Modify the base64 entropy score. If a value
-                                  greater than the default (4.5 in a range of
-                                  0.0-6.0) is specified, tartufo lists higher
-                                  entropy base64 strings (longer or more
-                                  randomized strings. A lower value lists
-                                  lower entropy base64 strings (shorter or
-                                  less randomized strings).
-  -hex, --hex-entropy-score TEXT  [DEPRECATED] Use `--entropy-sensitivity`.
-                                  Modify the hexadecimal entropy score. If a
-                                  value greater than the default (3.0 in a
-                                  range of 0.0-4.0) is specified, tartufo
-                                  lists higher entropy hexadecimal strings
-                                  (longer or more randomized strings). A lower
-                                  value lists lower entropy hexadecimal
-                                  strings (shorter or less randomized
-                                  strings).
+  --color / --no-color            Enable or disable terminal color. If not
+                                  provided (default), enabled if output is a
+                                  terminal (TTY).
   -V, --version                   Show the version and exit.
   -h, --help                      Show this message and exit.
 
